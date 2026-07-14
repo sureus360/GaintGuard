@@ -23,11 +23,18 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import androidx.work.WorkInfo
 import android.util.Log
+import android.widget.Toast
 import java.util.concurrent.TimeUnit
 
 class MainActivity : ComponentActivity() {
     private lateinit var policyController: DevicePolicyController
+    private var preferenceChangeListener: SharedPreferences.OnSharedPreferenceChangeListener? = null
+
+    private var isLocked by mutableStateOf(false)
+    private var lastSync by mutableStateOf("Noch nie")
+    private var lockReason by mutableStateOf("Das Gerät wurde gesperrt.")
 
     companion object {
         var isAuthenticated = false
@@ -40,12 +47,12 @@ class MainActivity : ComponentActivity() {
         setContent {
             val sharedPrefs = remember { getSharedPreferences("RieseGuardPrefs", Context.MODE_PRIVATE) }
             var authenticated by remember { mutableStateOf(isAuthenticated) }
-            
-            var isLocked by remember { mutableStateOf(sharedPrefs.getBoolean("is_locked", false)) }
-            var lastSync by remember { mutableStateOf(sharedPrefs.getString("last_sync", "Noch nie") ?: "Noch nie") }
-            var lockReason by remember { mutableStateOf(sharedPrefs.getString("lock_reason", "Das Gerät wurde gesperrt.") ?: "Das Gerät wurde gesperrt.") }
 
             DisposableEffect(sharedPrefs) {
+                isLocked = sharedPrefs.getBoolean("is_locked", false)
+                lastSync = sharedPrefs.getString("last_sync", "Noch nie") ?: "Noch nie"
+                lockReason = sharedPrefs.getString("lock_reason", "Das Gerät wurde gesperrt.") ?: "Das Gerät wurde gesperrt."
+
                 val listener = SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
                     when (key) {
                         "is_locked" -> isLocked = prefs.getBoolean("is_locked", false)
@@ -53,6 +60,7 @@ class MainActivity : ComponentActivity() {
                         "lock_reason" -> lockReason = prefs.getString("lock_reason", "Das Gerät wurde gesperrt.") ?: "Das Gerät wurde gesperrt."
                     }
                 }
+                preferenceChangeListener = listener
                 sharedPrefs.registerOnSharedPreferenceChangeListener(listener)
                 onDispose {
                     sharedPrefs.unregisterOnSharedPreferenceChangeListener(listener)
@@ -73,7 +81,14 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     if (isLocked) {
-                        LockScreen(lockReason)
+                        LockScreen(
+                            reason = lockReason,
+                            onForceSync = {
+                                val workManager = WorkManager.getInstance(applicationContext)
+                                val forceSync = OneTimeWorkRequestBuilder<SyncWorker>().build()
+                                workManager.enqueueUniqueWork("RieseSyncManual", ExistingWorkPolicy.REPLACE, forceSync)
+                            }
+                        )
                     } else if (!authenticated) {
                         PinScreen(
                             onPinCorrect = {
@@ -102,6 +117,10 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         if (::policyController.isInitialized) {
             val sharedPrefs = getSharedPreferences("RieseGuardPrefs", Context.MODE_PRIVATE)
+            isLocked = sharedPrefs.getBoolean("is_locked", false)
+            lastSync = sharedPrefs.getString("last_sync", "Noch nie") ?: "Noch nie"
+            lockReason = sharedPrefs.getString("lock_reason", "Das Gerät wurde gesperrt.") ?: "Das Gerät wurde gesperrt."
+            
             if (sharedPrefs.getBoolean("settings_blocked", false)) {
                 policyController.setApplicationHidden("com.android.settings", true)
             }
@@ -116,7 +135,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun LockScreen(reason: String) {
+fun LockScreen(reason: String, onForceSync: () -> Unit) {
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = Color(0xFF111218)
@@ -153,6 +172,13 @@ fun LockScreen(reason: String) {
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium
                 )
+            }
+            Spacer(modifier = Modifier.height(24.dp))
+            Button(
+                onClick = onForceSync,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Sperrstatus aktualisieren")
             }
         }
     }
@@ -226,6 +252,46 @@ fun RieseGuardScreen(
     var isDeviceOwner by remember { mutableStateOf(controller.isDeviceOwner()) }
     var isDeviceAdmin by remember { mutableStateOf(controller.isDeviceAdmin()) }
 
+    val workManager = remember { WorkManager.getInstance(context) }
+    val manualSyncFlow = remember { workManager.getWorkInfosForUniqueWorkFlow("RieseSyncManual") }
+    val syncWorkInfos by manualSyncFlow.collectAsState(initial = emptyList())
+    
+    var syncMessage by remember { mutableStateOf<String?>(null) }
+    var isSyncing by remember { mutableStateOf(false) }
+
+    LaunchedEffect(syncWorkInfos) {
+        val workInfo = syncWorkInfos.firstOrNull()
+        if (workInfo != null) {
+            when (workInfo.state) {
+                WorkInfo.State.RUNNING, WorkInfo.State.ENQUEUED -> {
+                    isSyncing = true
+                }
+                WorkInfo.State.SUCCEEDED -> {
+                    if (isSyncing) {
+                        isSyncing = false
+                        syncMessage = "Synchronisierung erfolgreich!"
+                    }
+                }
+                WorkInfo.State.FAILED -> {
+                    if (isSyncing) {
+                        isSyncing = false
+                        syncMessage = "Fehler bei der Synchronisierung!"
+                    }
+                }
+                else -> {
+                    isSyncing = false
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(syncMessage) {
+        syncMessage?.let {
+            Toast.makeText(context, it, Toast.LENGTH_LONG).show()
+            syncMessage = null
+        }
+    }
+
     LaunchedEffect(Unit) {
         while(true) {
             isDeviceOwner = controller.isDeviceOwner()
@@ -253,19 +319,27 @@ fun RieseGuardScreen(
 
         Button(
             onClick = {
-                sharedPrefs.edit()
-                    .putString("server_url", serverUrl)
-                    .putInt("device_id", deviceIdStr.toIntOrNull() ?: -1)
-                    .putString("device_token", deviceToken)
-                    .apply()
-                
-                val workManager = WorkManager.getInstance(context)
-                val forceSync = OneTimeWorkRequestBuilder<SyncWorker>().build()
-                workManager.enqueueUniqueWork("RieseSyncManual", ExistingWorkPolicy.REPLACE, forceSync)
+                val parsedId = deviceIdStr.toIntOrNull()
+                if (serverUrl.isBlank() || parsedId == null || parsedId <= 0 || deviceToken.isBlank()) {
+                    Toast.makeText(context, "Bitte alle Felder korrekt ausfüllen!", Toast.LENGTH_SHORT).show()
+                } else {
+                    sharedPrefs.edit()
+                        .putString("server_url", serverUrl)
+                        .putInt("device_id", parsedId)
+                        .putString("device_token", deviceToken)
+                        .apply()
+                    
+                    val forceSync = OneTimeWorkRequestBuilder<SyncWorker>().build()
+                    workManager.enqueueUniqueWork("RieseSyncManual", ExistingWorkPolicy.REPLACE, forceSync)
+                }
             },
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text("Speichern & Sync")
+            if (isSyncing) {
+                Text("Sync läuft...")
+            } else {
+                Text("Speichern & Sync")
+            }
         }
 
         Divider()
