@@ -95,25 +95,11 @@ class SyncWorker(appContext: Context, workerParams: WorkerParameters) :
                     val isSettingsBlocked = blockedPackages.contains("com.android.settings")
                     sharedPrefs.edit().putBoolean("settings_blocked", isSettingsBlocked).apply()
 
-                    val hideablePackages = setOf("com.android.settings", "com.android.vending")
-                    
-                    // Optimization: Batch process apps
-                    val appsToSuspend = mutableListOf<String>()
-                    val appsToUnsuspend = mutableListOf<String>()
-
                     apps.forEach { app ->
                         val pkg = app.packageName
                         val shouldBlock = blockedPackages.contains(pkg)
-                        
-                        if (hideablePackages.contains(pkg)) {
-                            policyController.setApplicationHidden(pkg, shouldBlock)
-                        } else {
-                            if (shouldBlock) appsToSuspend.add(pkg) else appsToUnsuspend.add(pkg)
-                        }
+                        policyController.setApplicationHidden(pkg, shouldBlock)
                     }
-                    
-                    if (appsToSuspend.isNotEmpty()) policyController.suspendPackages(appsToSuspend, true)
-                    if (appsToUnsuspend.isNotEmpty()) policyController.suspendPackages(appsToUnsuspend, false)
                 }
                 
                 Result.success()
