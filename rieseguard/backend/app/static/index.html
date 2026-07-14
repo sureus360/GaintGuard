@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RieseGuard - Eltern Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css?v=2">
+</head>
+<body class="dark-mode">
+    <div class="background-decorations">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+    </div>
+
+    <!-- AUTHENTICATION SCREEN -->
+    <div id="auth-screen" class="glass-card container fade-in">
+        <h1 class="logo-title">Riese<span>Guard</span></h1>
+        <p class="subtitle">Schutz & Transparenz für deine Familie</p>
+        
+        <div class="tabs">
+            <button id="tab-login" class="tab-btn active">Anmelden</button>
+            <button id="tab-register" class="tab-btn">Registrieren</button>
+        </div>
+
+        <form id="auth-form" class="form-group">
+            <div class="input-wrap">
+                <input type="email" id="email" required placeholder=" ">
+                <label for="email">E-Mail Adresse</label>
+            </div>
+            
+            <div class="input-wrap">
+                <input type="password" id="password" required placeholder=" ">
+                <label for="password">Passwort</label>
+            </div>
+
+            <button type="submit" id="auth-submit-btn" class="btn btn-primary">Anmelden</button>
+        </form>
+    </div>
+
+    <!-- MAIN DASHBOARD SCREEN -->
+    <div id="dashboard-screen" class="container hidden fade-in">
+        <header class="dashboard-header">
+            <div>
+                <h1 class="logo-title-sm">Riese<span>Guard</span></h1>
+                <p id="user-display" class="user-info">Eltern-Konto</p>
+            </div>
+            <button id="logout-btn" class="btn btn-secondary btn-sm">Abmelden</button>
+        </header>
+
+        <main class="dashboard-content">
+            <div class="section-header">
+                <h2>Geräteübersicht</h2>
+                <button id="add-device-btn" class="btn btn-primary btn-sm">+ Gerät hinzufügen</button>
+            </div>
+
+            <div id="devices-grid" class="devices-grid">
+                <div class="loading-spinner-wrapper">
+                    <div class="spinner"></div>
+                    <p>Lade Geräte...</p>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- PAIRING MODAL -->
+    <div id="pairing-modal" class="modal-overlay hidden">
+        <div class="glass-card modal-content scale-in">
+            <h3>Gerät erfolgreich erstellt</h3>
+            <p class="modal-desc">Trage diese Zugangsdaten in der RieseGuard-App auf dem Kindergerät ein:</p>
+            
+            <div class="pairing-details">
+                <div class="pair-row">
+                    <span class="pair-label">Server URL:</span>
+                    <span id="pair-url" class="pair-val font-mono">http://192.168.x.x:8088</span>
+                </div>
+                <div class="pair-row">
+                    <span class="pair-label">Geräte ID:</span>
+                    <span id="pair-id" class="pair-val font-mono font-bold">1</span>
+                </div>
+                <div class="pair-row">
+                    <span class="pair-label">Geräte Token:</span>
+                    <span id="pair-token" class="pair-val font-mono select-all">token_here</span>
+                </div>
+            </div>
+
+            <button id="close-modal-btn" class="btn btn-primary">Schließen & Fertig</button>
+        </div>
+    </div>
+
+    <!-- ADD DEVICE MODAL -->
+    <div id="add-device-modal" class="modal-overlay hidden">
+        <div class="glass-card modal-content scale-in">
+            <h3>Neues Gerät hinzufügen</h3>
+            <form id="add-device-form" class="form-group">
+                <div class="input-wrap">
+                    <input type="text" id="device-name" required placeholder=" " minlength="2">
+                    <label for="device-name">Name des Kindergeräts (z.B. Tom's Handy)</label>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" id="cancel-device-btn" class="btn btn-secondary">Abbrechen</button>
+                    <button type="submit" class="btn btn-primary">Erstellen</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    <!-- APP MANAGEMENT MODAL -->
+    <div id="apps-modal" class="modal-overlay hidden">
+        <div class="glass-card modal-content apps-modal-content scale-in">
+            <div class="modal-header-wrap" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <h3 style="margin: 0;">App-Freigaben verwalten</h3>
+                <button id="close-apps-modal-btn" class="close-btn" style="background: none; border: none; color: #fff; font-size: 24px; cursor: pointer;">&times;</button>
+            </div>
+            <p class="modal-desc" style="margin-bottom: 16px; font-size: 14px; opacity: 0.8;">Aktiviere oder deaktiviere die Apps, die auf dem Gerät genutzt werden dürfen.</p>
+            
+            <div class="search-bar-wrap" style="margin-bottom: 16px;">
+                <input type="text" id="app-search-input" placeholder="Nach App suchen..." style="width: 100%; padding: 12px 16px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.2); color: #fff; box-sizing: border-box;">
+            </div>
+
+            <div id="apps-list-container" class="apps-list-container" style="max-height: 400px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-right: 4px;">
+                <!-- App list rows loaded dynamically -->
+                <div class="loading-spinner-wrapper" style="text-align: center; padding: 20px;">
+                    <div class="spinner" style="margin: 0 auto 10px;"></div>
+                    <p style="margin: 0; font-size: 14px; opacity: 0.7;">Lade Apps...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js?v=3"></script>
+</body>
+</html>

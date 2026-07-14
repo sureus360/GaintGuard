@@ -1,0 +1,38 @@
+# Gradle & Android Studio
+.gradle/
+.idea/
+.kotlin/
+local.properties
+**/build/
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aar
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.toast
+.cache
+.pytest_cache/
+.mypy_cache/
+
+# OS/System
+.DS_Store
+Thumbs.db
+
+# Database / Local data
+rieseguard/data/postgres/
+rieseguard/data/
+
+# Docker / Environment
+.env

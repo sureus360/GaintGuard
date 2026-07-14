@@ -1,0 +1,23 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: rieseguard-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: rieseguard
+      POSTGRES_USER: rieseguard
+      POSTGRES_PASSWORD: Combat2000mk2
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+
+  backend:
+    build: ./backend
+    container_name: rieseguard-backend
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    environment:
+      DATABASE_URL: postgresql+psycopg://rieseguard:Combat2000mk2@postgres:5432/rieseguard
+      JWT_SECRET: Combat2000mk2
+    ports:
+      - "8088:8088"
