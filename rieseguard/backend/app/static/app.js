@@ -207,7 +207,7 @@ function createDeviceCard(device) {
     if (device.last_seen) {
         const lastSeenDate = new Date(device.last_seen);
         const timeDiff = new Date() - lastSeenDate;
-        isOnline = timeDiff < 65000; // 65 seconds to allow buffer for 30s worker
+        isOnline = timeDiff < 20 * 60 * 1000; // 20 minutes to match 15m Android WorkManager interval
         
         // Format last seen date nicely
         syncTimeText = lastSeenDate.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
