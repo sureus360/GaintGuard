@@ -36,3 +36,6 @@ rieseguard/data/
 
 # Docker / Environment
 .env
+
+# Temp log files
+*.txt

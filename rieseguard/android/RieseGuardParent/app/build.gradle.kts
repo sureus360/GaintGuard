@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace = "de.riese.rieseguard"
+    namespace = "de.riese.rieseguardparent"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "de.riese.rieseguard"
+        applicationId = "de.riese.rieseguardparent"
         minSdk = 26
         targetSdk = 34
         versionCode = 1
@@ -53,19 +53,19 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.8.2")
     
     // Compose
-    implementation(platform("androidx.compose:compose-bom:2024.01.00"))
+    implementation(platform("androidx.compose:compose-bom:2024.12.01"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     
-    // WorkManager for background sync
-    implementation("androidx.work:work-runtime-ktx:2.9.0")
-    
     // Network & JSON Parsing
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.google.code.gson:gson:2.10.1")
-
-    // QR Code Scanning
-    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+    
+    // Biometric Authentication
+    implementation("androidx.biometric:biometric:1.1.0")
+    
+    // QR Code Generation
+    implementation("com.google.zxing:core:3.5.3")
 }

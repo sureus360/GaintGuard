@@ -48,11 +48,35 @@ class DevicePolicyController(private val context: Context) {
             try {
                 if (active) {
                     dpm.setLockTaskPackages(adminComponent, arrayOf(packageName))
+                    
+                    // Disable status bar pulldown (requires Android 6.0+)
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                        dpm.setStatusBarDisabled(adminComponent, true)
+                    }
+                    
+                    // Hide settings app programmatically to block setting modifications
+                    dpm.setApplicationHidden(adminComponent, "com.android.settings", true)
+                    
+                    // Add app controls restriction (disallows force-stopping or uninstalling)
+                    dpm.addUserRestriction(adminComponent, android.os.UserManager.DISALLOW_APPS_CONTROL)
+                    Log.i("DevicePolicyController", "Kiosk mode restrictions activated")
                 } else {
                     dpm.setLockTaskPackages(adminComponent, arrayOf())
+                    
+                    // Re-enable status bar pulldown
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                        dpm.setStatusBarDisabled(adminComponent, false)
+                    }
+                    
+                    // Unhide settings app
+                    dpm.setApplicationHidden(adminComponent, "com.android.settings", false)
+                    
+                    // Remove app controls restriction
+                    dpm.clearUserRestriction(adminComponent, android.os.UserManager.DISALLOW_APPS_CONTROL)
+                    Log.i("DevicePolicyController", "Kiosk mode restrictions deactivated")
                 }
             } catch (e: Exception) {
-                Log.e("DevicePolicyController", "Error setting lock task packages", e)
+                Log.e("DevicePolicyController", "Error setting kiosk mode restrictions", e)
             }
         }
     }
@@ -112,4 +136,48 @@ class DevicePolicyController(private val context: Context) {
             }
         }
     }
+
+    fun setPrivateDns(enabled: Boolean): Boolean {
+        if (!isDeviceOwner()) {
+            Log.w("DevicePolicyController", "Cannot set Private DNS: Not Device Owner")
+            return false
+        }
+        return if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            try {
+                if (enabled) {
+                    dpm.setGlobalPrivateDnsModeSpecifiedHost(adminComponent, "family.cloudflare-dns.com")
+                    Log.i("DevicePolicyController", "Enforced Cloudflare Family Private DNS")
+                } else {
+                    dpm.setGlobalPrivateDnsModeOpportunistic(adminComponent)
+                    Log.i("DevicePolicyController", "Reset Private DNS to Opportunistic")
+                }
+                true
+            } catch (e: Exception) {
+                Log.e("DevicePolicyController", "Error setting Private DNS", e)
+                false
+            }
+        } else {
+            Log.w("DevicePolicyController", "Private DNS enforcement requires Android 10 (API 29)+")
+            false
+        }
+    }
+
+    fun setSchoolMode(active: Boolean) {
+        if (isDeviceOwner()) {
+            try {
+                if (active) {
+                    dpm.setMasterVolumeMuted(adminComponent, true)
+                    dpm.addUserRestriction(adminComponent, android.os.UserManager.DISALLOW_ADJUST_VOLUME)
+                    Log.i("DevicePolicyController", "School mode activated: device muted, volume keys disabled")
+                } else {
+                    dpm.setMasterVolumeMuted(adminComponent, false)
+                    dpm.clearUserRestriction(adminComponent, android.os.UserManager.DISALLOW_ADJUST_VOLUME)
+                    Log.i("DevicePolicyController", "School mode deactivated: device unmuted, volume keys restored")
+                }
+            } catch (e: Exception) {
+                Log.e("DevicePolicyController", "Error setting school mode", e)
+            }
+        }
+    }
 }
+

@@ -1,5 +1,6 @@
 package de.riese.rieseguard
 
+import android.app.Activity
 import android.content.Context
 import android.os.Bundle
 import android.content.SharedPreferences
@@ -27,6 +28,10 @@ import androidx.work.WorkInfo
 import android.util.Log
 import android.widget.Toast
 import java.util.concurrent.TimeUnit
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanOptions
+import androidx.activity.compose.rememberLauncherForActivityResult
+import org.json.JSONObject
 
 class MainActivity : ComponentActivity() {
     private lateinit var policyController: DevicePolicyController
@@ -44,6 +49,14 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         policyController = DevicePolicyController(this)
 
+        // Start the persistent real-time sync foreground service
+        val serviceIntent = android.content.Intent(this, RieseGuardService::class.java)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            startForegroundService(serviceIntent)
+        } else {
+            startService(serviceIntent)
+        }
+
         setContent {
             val sharedPrefs = remember { getSharedPreferences("RieseGuardPrefs", Context.MODE_PRIVATE) }
             var authenticated by remember { mutableStateOf(isAuthenticated) }
@@ -53,9 +66,37 @@ class MainActivity : ComponentActivity() {
                 lastSync = sharedPrefs.getString("last_sync", "Noch nie") ?: "Noch nie"
                 lockReason = sharedPrefs.getString("lock_reason", "Das Gerät wurde gesperrt.") ?: "Das Gerät wurde gesperrt."
 
+                if (isLocked) {
+                    try {
+                        policyController.setKioskModeEnabled(true)
+                        startLockTask()
+                    } catch (e: Exception) {
+                        Log.e("MainActivity", "Error starting lock task on init", e)
+                    }
+                }
+
                 val listener = SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
                     when (key) {
-                        "is_locked" -> isLocked = prefs.getBoolean("is_locked", false)
+                        "is_locked" -> {
+                            val locked = prefs.getBoolean("is_locked", false)
+                            isLocked = locked
+                            if (locked) {
+                                try {
+                                    policyController.setKioskModeEnabled(true)
+                                    startLockTask()
+                                } catch (e: Exception) {
+                                    Log.e("MainActivity", "Error starting lock task", e)
+                                }
+                            } else {
+                                try {
+                                    stopLockTask()
+                                    policyController.setKioskModeEnabled(false)
+                                    finish()
+                                } catch (e: Exception) {
+                                    Log.e("MainActivity", "Error stopping lock task", e)
+                                }
+                            }
+                        }
                         "last_sync" -> lastSync = prefs.getString("last_sync", "Noch nie") ?: "Noch nie"
                         "lock_reason" -> lockReason = prefs.getString("lock_reason", "Das Gerät wurde gesperrt.") ?: "Das Gerät wurde gesperrt."
                     }
@@ -73,6 +114,10 @@ class MainActivity : ComponentActivity() {
                     .setInitialDelay(10, TimeUnit.SECONDS)
                     .build()
                 workManager.enqueueUniquePeriodicWork("RieseSyncPeriodic", ExistingPeriodicWorkPolicy.KEEP, syncRequest)
+
+                // Enqueue immediate one-time sync to update apps list and location right away
+                val immediateSync = OneTimeWorkRequestBuilder<SyncWorker>().build()
+                workManager.enqueueUniqueWork("RieseSyncImmediate", ExistingWorkPolicy.REPLACE, immediateSync)
             }
 
             MaterialTheme {
@@ -121,6 +166,15 @@ class MainActivity : ComponentActivity() {
             lastSync = sharedPrefs.getString("last_sync", "Noch nie") ?: "Noch nie"
             lockReason = sharedPrefs.getString("lock_reason", "Das Gerät wurde gesperrt.") ?: "Das Gerät wurde gesperrt."
             
+            if (isLocked) {
+                try {
+                    policyController.setKioskModeEnabled(true)
+                    startLockTask()
+                } catch (e: Exception) {
+                    Log.e("MainActivity", "Error starting lock task onResume", e)
+                }
+            }
+
             if (sharedPrefs.getBoolean("settings_blocked", false)) {
                 policyController.setApplicationHidden("com.android.settings", true)
             }
@@ -131,6 +185,32 @@ class MainActivity : ComponentActivity() {
         super.onStop()
         // Optional: Keep authentication during the session? 
         // User said unstable, maybe auto-logout is annoying. Let's keep it for now.
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (isLocked) {
+            val intent = android.content.Intent(this, MainActivity::class.java).apply {
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            }
+            startActivity(intent)
+        }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (!hasFocus && isLocked) {
+            try {
+                @Suppress("DEPRECATION")
+                val closeRecents = android.content.Intent(android.content.Intent.ACTION_CLOSE_SYSTEM_DIALOGS)
+                sendBroadcast(closeRecents)
+            } catch (_: Exception) {}
+
+            val intent = android.content.Intent(this, MainActivity::class.java).apply {
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            }
+            startActivity(intent)
+        }
     }
 }
 
@@ -249,6 +329,24 @@ fun RieseGuardScreen(
     var deviceIdStr by remember { mutableStateOf(sharedPrefs.getInt("device_id", 1).toString()) }
     var deviceToken by remember { mutableStateOf(sharedPrefs.getString("device_token", "") ?: "") }
 
+    val scanLauncher = rememberLauncherForActivityResult(
+        contract = ScanContract(),
+        onResult = { result ->
+            val rawValue = result.contents
+            if (rawValue != null) {
+                try {
+                    val json = JSONObject(rawValue)
+                    serverUrl = json.getString("url")
+                    deviceIdStr = json.getInt("id").toString()
+                    deviceToken = json.getString("token")
+                    Toast.makeText(context, "QR-Code erfolgreich gescannt!", Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    Toast.makeText(context, "Ungültiger QR-Code Inhalt!", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    )
+
     var isDeviceOwner by remember { mutableStateOf(controller.isDeviceOwner()) }
     var isDeviceAdmin by remember { mutableStateOf(controller.isDeviceAdmin()) }
 
@@ -292,11 +390,44 @@ fun RieseGuardScreen(
         }
     }
 
+    var locationGranted by remember {
+        mutableStateOf(
+            androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_FINE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        )
+    }
+    var usageStatsGranted by remember {
+        mutableStateOf(
+            try {
+                val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as android.app.AppOpsManager
+                val mode = appOps.noteOpNoThrow(
+                    android.app.AppOpsManager.OPSTR_GET_USAGE_STATS,
+                    android.os.Process.myUid(),
+                    context.packageName
+                )
+                mode == android.app.AppOpsManager.MODE_ALLOWED
+            } catch (e: Exception) {
+                false
+            }
+        )
+    }
+
     LaunchedEffect(Unit) {
         while(true) {
             isDeviceOwner = controller.isDeviceOwner()
             isDeviceAdmin = controller.isDeviceAdmin()
-            kotlinx.coroutines.delay(10000)
+            locationGranted = androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_FINE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            usageStatsGranted = try {
+                val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as android.app.AppOpsManager
+                val mode = appOps.noteOpNoThrow(
+                    android.app.AppOpsManager.OPSTR_GET_USAGE_STATS,
+                    android.os.Process.myUid(),
+                    context.packageName
+                )
+                mode == android.app.AppOpsManager.MODE_ALLOWED
+            } catch (e: Exception) {
+                false
+            }
+            kotlinx.coroutines.delay(5000)
         }
     }
 
@@ -309,7 +440,82 @@ fun RieseGuardScreen(
     ) {
         Text("RieseGuard Status", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
         Divider()
+
+        if (!locationGranted) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("GPS-Berechtigung fehlt (für Standort-Ortung)", fontSize = 12.sp, color = MaterialTheme.colorScheme.onErrorContainer, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Button(
+                        onClick = {
+                            if (context is Activity) {
+                                androidx.core.app.ActivityCompat.requestPermissions(
+                                    context,
+                                    arrayOf(
+                                        android.Manifest.permission.ACCESS_FINE_LOCATION,
+                                        android.Manifest.permission.ACCESS_COARSE_LOCATION
+                                    ),
+                                    101
+                                )
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                    ) {
+                        Text("Berechtigung erteilen", fontSize = 11.sp)
+                    }
+                }
+            }
+        }
         
+        if (!usageStatsGranted) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Nutzungsdatenzugriff fehlt (für App-Zeitlimits)", fontSize = 12.sp, color = MaterialTheme.colorScheme.onErrorContainer, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Button(
+                        onClick = {
+                            val intent = android.content.Intent(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS).apply {
+                                data = android.net.Uri.fromParts("package", context.packageName, null)
+                            }
+                            try {
+                                context.startActivity(intent)
+                            } catch (e: Exception) {
+                                context.startActivity(android.content.Intent(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS))
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                    ) {
+                        Text("Einstellungen öffnen", fontSize = 11.sp)
+                    }
+                }
+            }
+        }
+
+        
+        Button(
+            onClick = {
+                val options = ScanOptions().apply {
+                    setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+                    setPrompt("Kopplungs-QR-Code scannen")
+                    setCameraId(0)
+                    setBeepEnabled(false)
+                    setBarcodeImageEnabled(false)
+                    setOrientationLocked(false)
+                }
+                scanLauncher.launch(options)
+            },
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6366F1))
+        ) {
+            Text("📷 QR-Code scannen")
+        }
+
         OutlinedTextField(value = serverUrl, onValueChange = { serverUrl = it }, label = { Text("Server URL") }, modifier = Modifier.fillMaxWidth())
         
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

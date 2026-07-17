@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Float
 from sqlalchemy.sql import func
 from app.database import Base
 
@@ -22,6 +22,18 @@ class ChildDevice(Base):
     schedule_active = Column(Boolean, default=False)
     schedule_start = Column(String, default="21:00")
     schedule_end = Column(String, default="07:00")
+    
+    # New features
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
+    location_updated = Column(DateTime(timezone=True), nullable=True)
+    web_filter_active = Column(Boolean, default=False)
+    
+    # School mode
+    school_active = Column(Boolean, default=False)
+    school_start = Column(String, default="08:00")
+    school_end = Column(String, default="13:00")
+    today_usage_minutes = Column(Integer, default=0)
 
 class InstalledApp(Base):
     __tablename__ = "installed_apps"
@@ -31,3 +43,13 @@ class InstalledApp(Base):
     package_name = Column(String, nullable=False)
     app_name = Column(String, nullable=False)
     is_blocked = Column(Boolean, default=False)
+    usage_minutes = Column(Integer, default=0)
+
+class AppLimit(Base):
+    __tablename__ = "app_limits"
+
+    id = Column(Integer, primary_key=True, index=True)
+    device_id = Column(Integer, ForeignKey("child_devices.id", ondelete="CASCADE"), nullable=False)
+    package_name = Column(String, nullable=False)
+    daily_limit_minutes = Column(Integer, nullable=False)
+

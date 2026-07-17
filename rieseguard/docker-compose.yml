@@ -21,3 +21,5 @@ services:
       JWT_SECRET: Combat2000mk2
     ports:
       - "8088:8088"
+    volumes:
+      - ./backend/app/static/updates:/app/app/static/updates
