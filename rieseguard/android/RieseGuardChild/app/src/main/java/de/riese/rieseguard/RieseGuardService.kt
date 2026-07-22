@@ -28,6 +28,7 @@ class RieseGuardService : Service() {
     private var lastForegroundPkg: String? = null
     private var lastCheckTime: Long = System.currentTimeMillis()
     private var trackingDate: Int = Calendar.getInstance().get(Calendar.DAY_OF_YEAR)
+    private var screenReceiver: android.content.BroadcastReceiver? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -44,6 +45,27 @@ class RieseGuardService : Service() {
                 inMemoryUsageMs[pkg] = value
             }
         }
+        
+        // Register screen on receiver
+        screenReceiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                if (intent?.action == Intent.ACTION_SCREEN_ON || intent?.action == Intent.ACTION_USER_PRESENT) {
+                    Log.i("RieseGuardService", "Screen woke up. Forcing immediate sync.")
+                    serviceScope.launch {
+                        try {
+                            performSync()
+                        } catch (e: Exception) {
+                            Log.e("RieseGuardService", "Error on screen wake sync", e)
+                        }
+                    }
+                }
+            }
+        }
+        val filter = android.content.IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_ON)
+            addAction(Intent.ACTION_USER_PRESENT)
+        }
+        registerReceiver(screenReceiver, filter)
         
         // Start the polling loop
         serviceScope.launch {
@@ -207,13 +229,17 @@ class RieseGuardService : Service() {
                     .putBoolean("is_locked", isLocked)
                     .putString("lock_reason", lockReason)
                     .apply()
-                
-                // If the device just got locked, launch MainActivity immediately to display the lock overlay
-                if (isLocked) {
-                    val intent = Intent(this, MainActivity::class.java).apply {
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                    }
+            }
+            
+            // Constantly enforce lock if we are locked
+            if (isLocked) {
+                val intent = Intent(this, MainActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                }
+                try {
                     startActivity(intent)
+                } catch (e: Exception) {
+                    Log.e("RieseGuardService", "Could not start MainActivity", e)
                 }
             }
 
@@ -342,6 +368,11 @@ class RieseGuardService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         serviceJob.cancel()
+        screenReceiver?.let {
+            try {
+                unregisterReceiver(it)
+            } catch (e: Exception) {}
+        }
     }
 
     private fun getTodayAppUsageMinutes(context: Context, packageName: String): Int {

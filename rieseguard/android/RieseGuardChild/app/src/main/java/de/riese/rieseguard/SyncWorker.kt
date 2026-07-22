@@ -108,6 +108,14 @@ class SyncWorker(appContext: Context, workerParams: WorkerParameters) :
 
                 if (isLocked) {
                     policyController.lockDevice()
+                    val intent = android.content.Intent(applicationContext, MainActivity::class.java).apply {
+                        addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    }
+                    try {
+                        applicationContext.startActivity(intent)
+                    } catch (e: Exception) {
+                        Log.e("SyncWorker", "Error starting MainActivity", e)
+                    }
                 }
 
                 if (policyController.isDeviceOwner()) {
